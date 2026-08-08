@@ -406,17 +406,23 @@ function extractAllBlocks(xml, tagName) {
 /* ======================================================================
    Sync Pronote — via la librairie npm "pawnote" (pas d'API officielle,
    projet tiers activement maintenu, utilisé par l'appli Papillon).
-   ⚠️ Contrairement au reste de ce fichier, cette partie n'a PAS pu être
-   testée avec un vrai compte Pronote ici. Le nom de la fonction de
-   récupération d'emploi du temps par plage de dates (getTimetableFromDate)
-   est une déduction à partir du README de pawnote ("Timetable per week and
-   from/to dates"), pas une doc consultée ligne à ligne — la doc officielle
-   était en pleine réécriture au moment d'écrire ce code. Si le premier test
-   plante avec un message du genre "pronote.getTimetableFromDate is not a
-   function", va voir la référence API sur pawnote.js.org (ou les exemples
-   du repo GitHub LiterateInk/Pawnote.js) pour le nom exact, et ajuste
-   uniquement cette ligne. Pareil pour les noms de champs sur chaque "lesson"
-   (from/to/subject/canceled) dans pronoteLessonToAppSlot ci-dessous.
+   ✅ Noms de fonctions/champs vérifiés directement dans le .d.ts publié du
+   paquet pawnote@1.6.2 (dist/index.d.ts, téléchargé et inspecté) :
+     - Récupération du planning : `timetableFromIntervals(session, startDate, endDate)`
+       (et non `getTimetableFromDate`, qui n'existe pas dans cette version).
+     - `parseTimetable(session, timetable, options)` ne retourne rien (void) :
+       elle filtre `timetable.classes` en place. Il faut lire `timetable.classes`
+       après l'appel, pas récupérer une valeur de retour.
+     - `timetable.classes` mélange des entrées "lesson"/"activity"/"detention"
+       (champ discriminant `is`) ; seules les "lesson" ont `subject`/`canceled`.
+     - Sur une "lesson" : `startDate`/`endDate` sont déjà des objets Date (pas
+       des chaînes `from`/`to`), `canceled` est un booléen, `subject` est
+       `{ id, name, inGroups }` ou `undefined`.
+   Cela dit, cette partie reste NON testée avec un vrai compte Pronote (seule
+   la signature de l'API a pu être vérifiée hors-ligne, pas le comportement
+   réel du serveur Pronote). Si `/pronote/sync` échoue encore, l'erreur vient
+   plus probablement des identifiants/de l'URL d'établissement ou d'un cas
+   particulier du serveur Pronote que d'un nom de fonction incorrect.
    ⚠️ Il faut l'URL Pronote spécifique à l'établissement (visible dans la
    barre d'adresse quand on se connecte sur pronote.index-education.net,
    ou dans l'app Pronote > Partager/QR code) — pas juste l'identifiant.
@@ -455,15 +461,25 @@ async function handlePronoteSync(request) {
 
     const { startDate, endDate } = currentWeekDatesLocal();
 
-    // ⚠️ Voir avertissement en haut du bloc : nom de fonction à vérifier.
-    const timetable = await pronote.getTimetableFromDate(session, startDate, endDate);
-    const lessons = pronote.parseTimetable(session, timetable, {
+    // Vérifié directement dans le .d.ts publié du paquet "pawnote" 1.6.2 :
+    // - la fonction s'appelle `timetableFromIntervals` (pas `getTimetableFromDate`)
+    //   et prend directement (session, startDate, endDate).
+    // - `parseTimetable` ne RETOURNE rien (void) : elle filtre `timetable.classes`
+    //   EN PLACE selon les options. Il faut donc lire `timetable.classes` après coup,
+    //   pas récupérer une valeur de retour.
+    const timetable = await pronote.timetableFromIntervals(session, startDate, endDate);
+    pronote.parseTimetable(session, timetable, {
       withCanceledClasses: false,
       withPlannedClasses: true,
       withSuperposedCanceledClasses: false,
     });
 
-    const events = (lessons || []).map((lesson) => pronoteLessonToAppSlot(lesson)).filter(Boolean);
+    // `timetable.classes` mélange cours ("lesson"), activités ("activity") et
+    // colles ("detention") — on ne garde que les cours pour le planning.
+    const events = (timetable.classes || [])
+      .filter((c) => c.is === "lesson")
+      .map((lesson) => pronoteLessonToAppSlot(lesson))
+      .filter(Boolean);
 
     return Response.json({ events }, { headers: corsHeaders() });
   } catch (err) {
@@ -486,15 +502,17 @@ function currentWeekDatesLocal() {
   return { startDate: monday, endDate: sunday };
 }
 
-// ⚠️ Champs à vérifier une fois testé (voir avertissement en haut du bloc).
+// Champs confirmés dans le .d.ts de pawnote 1.6.2 (type TimetableClassLesson) :
+// startDate/endDate sont déjà des objets Date (pas des chaînes), canceled est
+// un booléen, subject est { id, name, inGroups } | undefined.
 function pronoteLessonToAppSlot(lesson) {
-  if (!lesson || !lesson.from) return null;
+  if (!lesson || !lesson.startDate) return null;
   if (lesson.canceled) return null;
 
-  const start = new Date(lesson.from);
-  const end = lesson.to ? new Date(lesson.to) : start;
+  const start = new Date(lesson.startDate);
+  const end = lesson.endDate ? new Date(lesson.endDate) : start;
   const dow = (start.getDay() + 6) % 7;
-  const title = (lesson.subject && lesson.subject.name) || lesson.title || "Cours Pronote";
+  const title = (lesson.subject && lesson.subject.name) || "Cours Pronote";
 
   return {
     externalId: String(lesson.id || (title + "-" + start.toISOString())),
