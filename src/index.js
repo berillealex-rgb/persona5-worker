@@ -483,6 +483,11 @@ async function handlePronoteSync(request) {
 
     return Response.json({ events }, { headers: corsHeaders() });
   } catch (err) {
+    // Log détaillé pour debug via Cloudflare Logs (temps réel) — l'app ne
+    // montre souvent qu'un message générique côté client, donc c'est ici
+    // qu'il faut regarder l'erreur exacte (nom de la classe d'erreur pawnote,
+    // stack, etc.).
+    console.error("Pronote sync error:", err && err.name, err && err.message, err && err.stack);
     return Response.json({ events: [], error: String(err && err.message ? err.message : err) }, { status: 502, headers: corsHeaders() });
   }
 }
