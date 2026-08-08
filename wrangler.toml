@@ -1,0 +1,27 @@
+name = "persona5"
+main = "src/index.js"
+compatibility_date = "2026-08-08"
+compatibility_flags = ["nodejs_compat"]
+
+# ⚠️ Bindings existants, recopiés depuis le worker déployé via le dashboard —
+# à NE PAS retirer, sinon un déploiement Wrangler pourrait les débrancher.
+
+[[kv_namespaces]]
+binding = "MEMORY"
+id = "010b4a3f27be40fb800a1870c20bbaf0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "p5tm-db"
+database_id = "06db553b-65a1-4c95-99a5-c7bb65cda813"
+
+# ⚠️ Vérifie/adapte cette expression à celle que tu as configurée dans le
+# dashboard (Worker > Triggers > Cron Triggers). Exemple ci-dessous : toutes
+# les 15 minutes.
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Note : les secrets (MISTRAL_API_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+# ne se déclarent PAS ici — ils restent ceux déjà configurés dans le
+# dashboard (Settings > Variables and Secrets) et survivent aux déploiements
+# via `wrangler deploy` tant qu'on ne les redéfinit pas explicitement.
